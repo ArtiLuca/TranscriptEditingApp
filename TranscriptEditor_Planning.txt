@@ -1,0 +1,228 @@
+✅ Big-picture architecture
+Model
+│
+├── Data         (pure data: Speaker, Segment, Transcript)
+│
+└── Service      (logic: parsing, editing, searching, I/O management)
+  
+Controller       (app logic + UI coordination)
+  
+View             (widgets, text editors, buttons, UI presentation only)
+
+🎯 Your dad’s use case
+    • Load a .txt transcript and an audio file
+    • Play audio while reading
+    • Edit text, fix mistakes, correct speaker labels
+    • Possibly split/merge segments
+    • Auto-save and export
+    • Undo/Redo
+    • Search by text or by speaker
+    • Manage list of transcripts
+To support this cleanly, here is how you should organize everything.
+
+🧱 MODEL::DATA — What belongs here (already done perfectly)
+✔ Pure data-holding classes with minimal helpers:
+    • Speaker
+    • Segment
+    • Transcript
+🧱 MODEL::SERVICE — The core engine of the app
+This is where your app becomes powerful without polluting the Controller or View.
+Here is the recommended final set of Service classes, what each one does, and why.
+
+⭐ 1. Model::Service::TranscriptParser
+Purpose:
+Convert raw .txt files → segments + speakers inside a Transcript.
+Responsibilities:
+    • Read .txt line by line
+    • Parses with a known list of speakers 
+    • Extract speakers automatically
+    • Split into segments
+    • Normalize whitespace
+    • Remove junk labels
+    • Combine continuation lines
+Output:
+A filled Transcript object (speakers + segments).
+Why separate?
+Because parsing is independent of editing, searching, or saving.
+
+⭐ 2. Model::Service::TranscriptEditor
+Purpose:
+Provide a complete editing API for modifying transcript content.
+Responsibilities:
+Segment-level editing
+    • Change segment text
+    • Split a segment
+    • Merge segments
+    • Delete segments
+    • Move segments up/down
+    • Append text to segment
+Speaker-level editing
+    • Change speaker for a segment
+    • Rename speaker (global or local)
+    • Validate speakers
+Text operations
+    • Apply find/replace
+    • Normalize whitespace
+    • Autocorrect punctuation (optional)
+Interaction with segments
+    • Insert new segment at position
+    • Remove segment by index
+    • Replace entire segments vector
+    • Rebuild raw text after edits
+❗ Undo/Redo belongs here, because editing actions occur here.
+Why this class?
+Because you do NOT want the View or Controller touching service logic.
+
+⭐ 3. Model::Service::TranscriptSearch
+Purpose:
+Utility for searching within a transcript.
+Responsibilities:
+    • Find all occurrences of a word
+    • Find next occurrence
+    • Search by speaker
+    • Search by speaker + keyword
+    • Full transcript indexing (future)
+Why separate?
+Keeps TranscriptEditor clean and SRP-compliant.
+
+⭐ 4. Model::Service::TranscriptManager
+Purpose:
+The “repository” class — owns all transcripts, loads/saves them, manages metadata.
+Responsibilities:
+    • Load all transcripts from a root folder
+    • Store them in a list
+    • Save changes back to disk
+    • Auto-save dirty transcripts
+    • Read/write metadata (meta.json)
+    • Store playback position
+    • Manage import/export logic (delegates to other classes)
+    • Provide access to transcripts
+This is also where you generate Transcript ID.
+
+⭐ 5. Model::Service::TranscriptImporter
+Purpose:
+Import a folder containing audio.mp3, ref.txt, edit.txt, etc.
+Responsibilities:
+    • Validate folder structure
+    • Detect audio file
+    • Detect text files
+    • Copy or reference them inside app’s root directory
+    • Create metadata
+    • Call TranscriptParser
+Why separate from Manager?
+Keeps Manager clean (no folder-scanning logic inside it).
+
+⭐ 6. Model::Service::TranscriptExporter
+Purpose:
+Output your dad’s edited transcript to .txt or .json.
+Responsibilities:
+    • Build .txt from segments + speakers
+    • Optionally create a cleaned-up version
+    • Export metadata
+    • Export to PDF (future)
+
+⭐ 7. Model::Service::UndoRedoStack (optional but recommended)
+Purpose:
+Let your dad undo text changes or speaker changes.
+Implementation options:
+    • Use Qt’s QUndoStack
+    • OR write your own small stack storing states
+    • Tightly integrated with TranscriptEditor
+
+⭐ 8. Audio is NOT in the Model layer
+Audio playback uses:
+    • QMediaPlayer
+    • QAudioOutput
+❗ Audio should be handled in the Controller, NOT the Service layer.
+Why?
+    • Audio is not part of the data model
+    • Audio belongs to UI-driven interaction
+    • Controller handles:
+        ◦ play/pause
+        ◦ seek
+        ◦ sync slider
+        ◦ update playback position back into TranscriptManager
+The Model layer stores only the playback position (lastPlaybackPositionMs).
+
+🧱 Controller namespace — the glue
+The Controller sits between:
+View ↔ Model::Service
+Responsibilities:
+    • Receive UI events:
+        ◦ user edits segment text
+        ◦ user clicks “rename speaker”
+        ◦ user selects transcript
+        ◦ user presses play/pause
+        ◦ user saves transcript
+    • Forward operations to:
+        ◦ TranscriptEditor
+        ◦ TranscriptParser
+        ◦ TranscriptSearch
+        ◦ TranscriptManager
+        ◦ QMediaPlayer
+    • Update the View widgets accordingly
+    • Handle autosave timer
+    • Track the current transcript index
+The Controller NEVER touches:
+    • Individual segments
+    • Speaker logic
+    • Parsing logic
+    • File I/O
+    • Audio file reading
+It strictly orchestrates.
+
+🎨 View layer — minimal
+The View should be:
+widgets only
+    • QPlainTextEdit for reference text
+    • QPlainTextEdit for editable text
+    • Buttons, sliders, lists
+    • Show segments visually however you want
+View NEVER:
+    • touches transcript data directly
+    • renames speakers
+    • merges segments
+    • updates files
+    • interacts with filesystem
+    • parses text
+    • manages undo/redo
+All View does is:
+Emit signals → Controller,
+and
+Show what the Controller tells it to show.
+
+🧩 Final architecture map
+Model::Data
+Speaker
+Segment
+Transcript
+Model::Service
+TranscriptParser
+TranscriptEditor
+TranscriptSearch
+TranscriptManager
+TranscriptImporter
+TranscriptExporter
+UndoRedoStack (optional)
+Controller
+TranscriptController
+(controls audio, connects UI, orchestrates operations)
+View
+MainWindow
+TranscriptEditorWidget
+Sidebar (list of transcripts)
+Audio control widget
+Search bar widget
+
+⭐ Short summary: best structure
+✔ MODEL::DATA
+Pure containers only.
+Already perfect.
+✔ MODEL::SERVICE
+All logic lives here.
+Parsing, editing, JSON, saving, searching, undo/redo.
+✔ CONTROLLER
+UI → Model::Service → UI
+Controls audio playback.
+✔ VIEW
+Widgets only. No logic.
